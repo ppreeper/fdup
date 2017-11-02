@@ -27,7 +27,7 @@ func checkDuplicate(path string, info os.FileInfo, err error) error {
 	}
 	digest := sha1.Sum(data)
 	if v, ok := files[digest]; ok {
-		fmt.Printf("%q is a duplicate of %q\n", path, v)
+		fmt.Printf("#rm %q\nrm %q\n\n", v, path)
 	} else {
 		files[digest] = path
 	}
@@ -37,7 +37,12 @@ func checkDuplicate(path string, info os.FileInfo, err error) error {
 
 func main() {
 	log.SetFlags(log.Lshortfile)
-	dir := os.Args[1]
+	var dir string
+	if len(os.Args) == 1 {
+		dir = "."
+	} else {
+		dir = os.Args[1]
+	}
 	err := filepath.Walk(dir, checkDuplicate)
 	if err != nil {
 		log.Fatal(err)
