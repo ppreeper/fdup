@@ -1,3 +1,3 @@
-module github.com/ppreeper/gorest
+module github.com/ppreeper/fdup
 
 go 1.15
