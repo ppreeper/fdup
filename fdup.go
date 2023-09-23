@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/sha1"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -20,7 +19,7 @@ func checkDuplicate(path string, info os.FileInfo, err error) error {
 		return nil
 	}
 
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		log.Print(err)
 		return nil
