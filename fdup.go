@@ -1,91 +1,79 @@
 package main
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"os"
-	"path/filepath"
-	"slices"
+	"strings"
 
+	"github.com/ppreeper/fdup/finder"
 	"github.com/urfave/cli/v2"
 )
-
-var files = make(map[[sha256.Size]byte][]string)
-
-func checkDuplicate(path string, info os.FileInfo, err error) error {
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return nil
-	}
-	if info.IsDir() {
-		return nil
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return nil
-	}
-	digest := sha256.Sum256(data)
-	files[digest] = append(files[digest], path)
-
-	return nil
-}
 
 func main() {
 	var delCount int
 	app := &cli.App{
-		Name:  "fdup",
-		Usage: "Find duplicate files",
+		Name:                   "fdup",
+		Usage:                  "Find duplicate files by content hash",
+		UseShortOptionHandling: true,
+		Description: `fdup recursively walks one or more directories, groups files by
+content hash, and reports groups of duplicates.
+
+Delete mode:
+  -d     Print all files as commented-out rm commands (#rm -vf ...)
+  -dd    Keep the first file (commented-out), emit active rm commands for the rest`,
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:    "delete",
 				Aliases: []string{"d"},
-				Usage:   "Add Delete commands to duplicate files",
+				Usage:   "emit rm commands for duplicates (-d comments all, -dd keeps first)",
 				Value:   false,
 				Count:   &delCount,
 			},
 			&cli.IntFlag{
 				Name:    "matchcount",
 				Aliases: []string{"m"},
-				Usage:   "Minimum count of duplicate files to show",
-				Value:   1,
+				Usage:   "minimum number of files in a duplicate group",
+				Value:   2,
+			},
+			&cli.BoolFlag{
+				Name:  "skip-empty",
+				Usage: "skip zero-length files",
+				Value: false,
 			},
 		},
 		Action: func(cCtx *cli.Context) error {
-			if cCtx.Int("matchcount") < 1 {
-				return fmt.Errorf("matchcount must be greater than 0")
+			matchcount := cCtx.Int("matchcount")
+			if matchcount < 2 {
+				return fmt.Errorf("matchcount must be at least 2")
 			}
+
 			dirs := cCtx.Args().Slice()
 			if len(dirs) == 0 {
-				dirs = append(dirs, ".")
+				dirs = []string{"."}
 			}
 
-			resfiles := make(map[[sha256.Size]byte][]string)
-
-			for _, dir := range dirs {
-				err := filepath.Walk(dir, checkDuplicate)
-				if err != nil {
-					return err
-				}
-				for digest, v := range files {
-					if len(v) > cCtx.Int("matchcount") {
-						resfiles[digest] = v
-					}
-				}
+			opts := &finder.Options{
+				SkipEmpty: cCtx.Bool("skip-empty"),
+				WarnFunc: func(msg string) {
+					fmt.Fprintf(os.Stderr, "warning: %s\n", msg)
+				},
 			}
 
-			for _, filelist := range resfiles {
-				slices.Sort(filelist)
-				for k, filename := range filelist {
-					if cCtx.Bool("delete") && delCount == 1 {
-						fmt.Println("#rm -vf \"" + filename + "\"")
-					} else if cCtx.Bool("delete") && delCount > 1 && k == 0 {
-						fmt.Println("#rm -vf \"" + filename + "\"")
-					} else if cCtx.Bool("delete") && delCount > 1 && k > 0 {
-						fmt.Println("rm -vf \"" + filename + "\"")
+			groups, err := finder.Find(dirs, matchcount, opts)
+			if err != nil {
+				return err
+			}
+
+			for _, group := range groups {
+				for i, path := range group.Paths {
+					if delCount >= 1 {
+						prefix := "rm -vf"
+						if delCount == 1 || i == 0 {
+							prefix = "#rm -vf"
+						}
+						fmt.Printf("%s %s\n", prefix, shellQuote(path))
 					} else {
-						fmt.Println(filename)
+						fmt.Println(path)
 					}
 				}
 				fmt.Println()
@@ -93,7 +81,17 @@ func main() {
 			return nil
 		},
 	}
+
 	if err := app.Run(os.Args); err != nil {
-		fmt.Printf("Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
 	}
+}
+
+// shellQuote returns a POSIX shell-safe single-quoted string.
+// Single quotes protect all special characters; embedded single quotes
+// are handled by ending the quote, inserting an escaped single quote,
+// and restarting the quote.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
